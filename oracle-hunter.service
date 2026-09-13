@@ -1,0 +1,16 @@
+[Unit]
+Description=Oracle Always Free ARM Hunter Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/OracleHunter-Py
+ExecStart=/home/ubuntu/OracleHunter-Py/.venv/bin/python3 /home/ubuntu/OracleHunter-Py/hunter.py
+Restart=always
+RestartSec=15
+StandardOutput=append:/home/ubuntu/OracleHunter-Py/oracle_hunter.log
+StandardError=append:/home/ubuntu/OracleHunter-Py/oracle_hunter.log
+
+[Install]
+WantedBy=multi-user.target

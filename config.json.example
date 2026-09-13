@@ -1,0 +1,34 @@
+{
+  "user_ocid": "ocid1.user.oc1..aaaaaaaaexampleuserocid",
+  "tenancy_ocid": "ocid1.tenancy.oc1..aaaaaaaexampletenancyocid",
+  "fingerprint": "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
+  "key_file_path": "~/.oci/oci_api_key.pem",
+  "region": "ap-mumbai-1",
+
+  "compartment_ocid": "ocid1.tenancy.oc1..aaaaaaaexampletenancyocid",
+  "subnet_ocid": "ocid1.subnet.oc1.ap-mumbai-1.aaaaaaaexamplesubnetocid",
+
+  "shape": "VM.Standard.A1.Flex",
+  "ocpus": 1,
+  "memory_in_gbs": 4,
+  "boot_volume_size_gb": 50,
+  "operating_system": "Canonical Ubuntu",
+  "os_version": "24.04",
+  "display_name": "free-tier-arm",
+
+  "ssh_public_key_path": "~/.ssh/id_rsa.pub",
+  "ssh_private_key_path": "~/.ssh/id_rsa",
+  "ssh_authorized_keys": [
+    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... user@laptop-or-pc"
+  ],
+  "local_pc_key_name": "oraclehost_id_rsa",
+
+  "availability_domain": "all",
+  "min_interval_seconds": 30,
+  "max_interval_seconds": 60,
+  "allow_existing": false,
+  "heartbeat_attempts": 300,
+
+  "telegram_bot_token": "",
+  "telegram_chat_id": ""
+}

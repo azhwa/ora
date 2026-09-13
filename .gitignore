@@ -1,0 +1,26 @@
+# Sensitive configuration with OCIDs and tokens
+config.json
+
+# Private keys & certificates
+*.pem
+*.key
+id_rsa
+oraclehost_id_rsa
+
+# Runtime logs
+*.log
+
+# Python virtual environment and bytecode
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+# PM2 local files
+.pm2/
+
+# OS specific files
+.DS_Store
+Thumbs.db
