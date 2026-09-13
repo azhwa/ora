@@ -62,12 +62,22 @@ def load_config(config_path: str = "config.json") -> Dict[str, Any]:
 def get_oci_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Builds OCI SDK configuration dictionary from config.json or ~/.oci/config."""
     # Option 1: Inline credentials in config.json
-    key_file = os.path.expanduser(cfg.get("key_file_path", ""))
-    if key_file and os.path.exists(key_file):
+    key_candidates = [
+        os.path.expanduser(cfg.get("key_file_path", "")),
+        os.path.expanduser("~/.oci/oci_api_key.pem"),
+        os.path.abspath("oci_api_key.pem"),
+    ]
+    resolved_key = None
+    for k in key_candidates:
+        if k and os.path.exists(k):
+            resolved_key = k
+            break
+
+    if resolved_key and cfg.get("user_ocid") and cfg.get("tenancy_ocid") and cfg.get("fingerprint"):
         return {
             "user": cfg["user_ocid"],
             "fingerprint": cfg["fingerprint"],
-            "key_file": key_file,
+            "key_file": resolved_key,
             "tenancy": cfg["tenancy_ocid"],
             "region": cfg.get("region", "ap-mumbai-1"),
         }
@@ -77,6 +87,13 @@ def get_oci_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if os.path.exists(oci_config_file):
         profile = cfg.get("oci_profile", "DEFAULT")
         return oci.config.from_file(file_location=oci_config_file, profile_name=profile)
+
+    expected_path = os.path.expanduser(cfg.get("key_file_path", "~/.oci/oci_api_key.pem"))
+    if not resolved_key:
+        raise FileNotFoundError(
+            f"API Private Key file not found at: '{expected_path}'. "
+            "Please upload your 'oci_api_key.pem' to ~/.oci/ or the project folder on this VPS."
+        )
 
     raise ValueError(
         "Could not find valid OCI credentials. Please specify user_ocid, tenancy_ocid, "
