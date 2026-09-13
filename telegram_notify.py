@@ -139,16 +139,28 @@ def notify_heartbeat(
     attempts: int,
     capacity_hits: int,
     current_ad: str,
-    elapsed_str: str
+    elapsed_str: str,
+    is_first_429: bool = False
 ) -> bool:
-    msg = (
-        "⏳ <b>Oracle Hunter Heartbeat</b>\n\n"
-        f"🔄 <b>Total Attempts:</b> {attempts}\n"
-        f"🚫 <b>Capacity Hits:</b> {capacity_hits}\n"
-        f"📍 <b>Last AD:</b> <code>{current_ad}</code>\n"
-        f"⏱ <b>Running For:</b> {elapsed_str}\n\n"
-        "💡 <i>Ketik /status untuk detail lengkap, atau /stop untuk menjeda.</i>"
-    )
+    if is_first_429:
+        msg = (
+            "⚠️ <b>Info: Kapasitas Penuh (Too Many Requests / 429) Terdeteksi</b>\n\n"
+            f"📍 <b>AD:</b> <code>{current_ad}</code>\n"
+            "ℹ️ <i>Oracle Cloud melaporkan kuota host ARM saat ini sedang penuh. "
+            "Bot otomatis masuk ke mode rotasi & retry berkala di background. "
+            "Laporan berkala akan dikirim setiap 20 percobaan.</i>\n\n"
+            "💡 <i>Ketik /status kapan saja untuk cek progres real-time.</i>"
+        )
+    else:
+        msg = (
+            "⏳ <b>Laporan Berkala: Too Many Requests (429)</b>\n\n"
+            f"🔄 <b>Total Percobaan:</b> {attempts}\n"
+            f"🚫 <b>Kapasitas Penuh (429):</b> {capacity_hits} kali\n"
+            f"📍 <b>AD Terakhir:</b> <code>{current_ad}</code>\n"
+            f"⏱ <b>Aktif Selama:</b> {elapsed_str}\n"
+            "<i>Status: Bot terus mencoba berburu kapasitas Always Free...</i>\n\n"
+            "💡 <i>Ketik /status untuk cek detail, atau /stop untuk menjeda.</i>"
+        )
     return send_telegram_message(bot_token, chat_id, msg)
 
 

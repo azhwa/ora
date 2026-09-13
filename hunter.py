@@ -410,7 +410,8 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
     attempts = 0
     capacity_hits = 0
     start_time = datetime.datetime.utcnow()
-    heartbeat_interval = int(cfg.get("heartbeat_attempts", 300))
+    heartbeat_interval = int(cfg.get("heartbeat_attempts", 20))
+    first_429_notified = False
 
     hunter_state = {
         "paused": False,
@@ -502,6 +503,13 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
             hunter_state["capacity_hits"] = capacity_hits
             logger.warning(f"Capacity unavailable or transient error ({code} / {status}): {message}")
 
+            # Notify user on the very first 429 encounter
+            if not first_429_notified:
+                first_429_notified = True
+                elapsed = datetime.datetime.utcnow() - start_time
+                elapsed_str = str(datetime.timedelta(seconds=int(elapsed.total_seconds())))
+                notify_heartbeat(tg_token, tg_chat_id, attempts, capacity_hits, ad, elapsed_str, is_first_429=True)
+
         except Exception as e:
             logger.warning(f"Unexpected network or client exception: {e}")
 
@@ -509,11 +517,11 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
             logger.info("Single attempt completed. Exiting.")
             return
 
-        # Periodic Heartbeat
+        # Periodic Heartbeat / 429 report (default every 20 attempts ~ 15 minutes)
         if attempts % heartbeat_interval == 0:
             elapsed = datetime.datetime.utcnow() - start_time
             elapsed_str = str(datetime.timedelta(seconds=int(elapsed.total_seconds())))
-            notify_heartbeat(tg_token, tg_chat_id, attempts, capacity_hits, ad, elapsed_str)
+            notify_heartbeat(tg_token, tg_chat_id, attempts, capacity_hits, ad, elapsed_str, is_first_429=False)
 
         # Sleep before next retry in 1s slices to respond immediately if /stop is sent
         delay = random.randint(min_interval, max_interval)
