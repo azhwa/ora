@@ -1,6 +1,9 @@
+import datetime
 import json
 import logging
 import os
+import threading
+import time
 import urllib.parse
 import urllib.request
 import uuid
@@ -119,7 +122,12 @@ def notify_startup(bot_token: str, chat_id: str, cfg: dict) -> bool:
         f"💻 <b>Shape:</b> <code>{cfg.get('shape', 'VM.Standard.A1.Flex')}</code>\n"
         f"⚡ <b>Specs:</b> {cfg.get('ocpus', 1)} OCPU / {cfg.get('memory_in_gbs', 4)} GB RAM\n"
         f"💿 <b>OS:</b> {cfg.get('operating_system', 'Canonical Ubuntu')} {cfg.get('os_version', '24.04')}\n"
-        f"⏱ <b>Interval:</b> {cfg.get('min_interval_seconds', 30)} - {cfg.get('max_interval_seconds', 60)}s\n"
+        f"⏱ <b>Interval:</b> {cfg.get('min_interval_seconds', 30)} - {cfg.get('max_interval_seconds', 60)}s\n\n"
+        "🎮 <b>Kontrol Bot via Chat:</b>\n"
+        "📊 <code>/status</code> - Cek status terkini\n"
+        "⏸️ <code>/stop</code> - Jeda pemburuan sementara\n"
+        "▶️ <code>/start</code> - Lanjutkan pemburuan\n"
+        "🛑 <code>/exit</code> - Matikan bot di PM2\n\n"
         "🎯 <i>Monitoring capacity in the background...</i>"
     )
     return send_telegram_message(bot_token, chat_id, msg)
@@ -138,8 +146,8 @@ def notify_heartbeat(
         f"🔄 <b>Total Attempts:</b> {attempts}\n"
         f"🚫 <b>Capacity Hits:</b> {capacity_hits}\n"
         f"📍 <b>Last AD:</b> <code>{current_ad}</code>\n"
-        f"⏱ <b>Running For:</b> {elapsed_str}\n"
-        "<i>Still hunting for available ARM capacity...</i>"
+        f"⏱ <b>Running For:</b> {elapsed_str}\n\n"
+        "💡 <i>Ketik /status untuk detail lengkap, atau /stop untuk menjeda.</i>"
     )
     return send_telegram_message(bot_token, chat_id, msg)
 
@@ -174,7 +182,7 @@ def notify_success(
         f"🖥 <b>From the Hunter VPS:</b>\n"
         f"<code>{bot_host_cmd}</code>\n\n"
         "📎 <i>Private key file is being attached below for mobile/backup access.</i>\n"
-        "✅ <i>Enjoy your Always Free ARM VPS!</i>"
+        "✅ <i>Bot has automatically stopped in PM2. Enjoy your Always Free ARM VPS!</i>"
     )
     send_telegram_message(bot_token, chat_id, msg)
 
@@ -201,3 +209,149 @@ def notify_abort(bot_token: str, chat_id: str, reason: str) -> bool:
         "⚠️ <i>Please check your Oracle Cloud account limits or configuration.</i>"
     )
     return send_telegram_message(bot_token, chat_id, msg)
+
+
+class TelegramBotListener(threading.Thread):
+    """
+    Background listener for incoming Telegram commands.
+    Allows controlling hunter (start/stop/status/exit) directly from Telegram chat.
+    """
+
+    def __init__(self, bot_token: Optional[str], authorized_chat_id: Optional[str], state: dict, cfg: dict):
+        super().__init__(daemon=True, name="TelegramListener")
+        self.bot_token = bot_token.strip() if bot_token else ""
+        self.authorized_chat_id = str(authorized_chat_id).strip() if authorized_chat_id else ""
+        self.state = state
+        self.cfg = cfg
+        self.last_update_id = 0
+        self.running = True
+
+    def flush_old_updates(self):
+        """Discards messages sent before listener started so they aren't re-executed."""
+        if not self.bot_token:
+            return
+        try:
+            url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates?offset=-1"
+            req = urllib.request.Request(url, headers={"User-Agent": "OracleHunterBot/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                res = json.loads(response.read().decode("utf-8"))
+                if res.get("ok") and res.get("result"):
+                    self.last_update_id = res["result"][-1]["update_id"] + 1
+        except Exception:
+            pass
+
+    def run(self):
+        if not self.bot_token or not self.authorized_chat_id:
+            logger.info("Telegram command listener disabled (token or chat_id missing).")
+            return
+
+        self.flush_old_updates()
+        logger.info("📱 Telegram command listener started (Accepting /status, /stop, /start, /exit)...")
+
+        while self.running:
+            try:
+                url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates?offset={self.last_update_id}&timeout=10"
+                req = urllib.request.Request(url, headers={"User-Agent": "OracleHunterBot/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    res = json.loads(response.read().decode("utf-8"))
+                    if not res.get("ok"):
+                        time.sleep(2)
+                        continue
+
+                    for update in res.get("result", []):
+                        self.last_update_id = update["update_id"] + 1
+                        msg = update.get("message", {})
+                        from_user = msg.get("from", {})
+                        chat = msg.get("chat", {})
+                        from_id = str(from_user.get("id") or chat.get("id") or "")
+                        text = msg.get("text", "").strip()
+
+                        # Security check: Only process messages from authorized user
+                        if from_id != self.authorized_chat_id:
+                            continue
+
+                        self.handle_command(text)
+            except Exception:
+                time.sleep(3)
+
+    def handle_command(self, text: str):
+        cmd = text.split()[0].lower() if text else ""
+        if "@" in cmd:
+            cmd = cmd.split("@")[0]
+
+        if cmd in ["/status", "/cek", "status", "cek"]:
+            status_text = "⏸️ <b>DIJEDA (PAUSED)</b>" if self.state.get("paused") else "🟢 <b>AKTIF BERBURU (HUNTING)</b>"
+            start_t = self.state.get("start_time", datetime.datetime.utcnow())
+            elapsed = datetime.datetime.utcnow() - start_t
+            elapsed_str = str(datetime.timedelta(seconds=int(elapsed.total_seconds())))
+
+            msg = (
+                "📊 <b>Status Oracle ARM Hunter</b>\n\n"
+                f"⚡ <b>Kondisi:</b> {status_text}\n"
+                f"🔄 <b>Total Percobaan:</b> {self.state.get('attempts', 0)}\n"
+                f"🚫 <b>Kapasitas Penuh (429):</b> {self.state.get('capacity_hits', 0)}\n"
+                f"📍 <b>AD Terakhir:</b> <code>{self.state.get('current_ad', 'N/A')}</code>\n"
+                f"⏱ <b>Aktif Selama:</b> {elapsed_str}\n"
+                f"💻 <b>Target:</b> {self.cfg.get('ocpus', 1)} OCPU / {self.cfg.get('memory_in_gbs', 4)} GB RAM\n\n"
+                "<i>Perintah Cepat:</i>\n"
+                "▶️ /start - Lanjutkan berburu\n"
+                "⏸️ /stop - Jeda sementara\n"
+                "📊 /status - Cek status terkini\n"
+                "🛑 /exit - Matikan proses di PM2"
+            )
+            send_telegram_message(self.bot_token, self.authorized_chat_id, msg)
+
+        elif cmd in ["/stop", "/pause", "stop", "pause"]:
+            if self.state.get("paused"):
+                send_telegram_message(
+                    self.bot_token,
+                    self.authorized_chat_id,
+                    "⚠️ <b>Bot sudah dalam keadaan dijeda (Paused).</b>\n\nKetik /start untuk melanjutkan."
+                )
+            else:
+                self.state["paused"] = True
+                msg = (
+                    "⏸️ <b>Pemburuan Dijeda!</b>\n\n"
+                    "Bot sementara berhenti mengirim permintaan ke Oracle Cloud.\n"
+                    "Ketik /start kapan saja untuk melanjutkan berburu."
+                )
+                send_telegram_message(self.bot_token, self.authorized_chat_id, msg)
+                logger.info("⏸️ Hunter paused via Telegram command.")
+
+        elif cmd in ["/start", "/resume", "start", "resume"]:
+            if not self.state.get("paused"):
+                send_telegram_message(
+                    self.bot_token,
+                    self.authorized_chat_id,
+                    "🟢 <b>Bot sudah aktif berburu!</b>\n\nKetik /status untuk melihat progres."
+                )
+            else:
+                self.state["paused"] = False
+                msg = (
+                    "▶️ <b>Pemburuan Dilanjutkan!</b>\n\n"
+                    "Bot mulai mencari kapasitas ARM kembali di Oracle Cloud... 🏹"
+                )
+                send_telegram_message(self.bot_token, self.authorized_chat_id, msg)
+                logger.info("▶️ Hunter resumed via Telegram command.")
+
+        elif cmd in ["/exit", "/kill", "/shutdown"]:
+            send_telegram_message(
+                self.bot_token,
+                self.authorized_chat_id,
+                "🛑 <b>Oracle Hunter Dimatikan di PM2!</b>\n\nProses di VPS telah dihentikan. Untuk menyalakan kembali, login ke VPS dan ketik:\n<code>pm2 restart oracle-hunter</code>"
+            )
+            logger.info("🛑 Hunter shutting down via Telegram command.")
+            self.running = False
+            os.system("pm2 stop oracle-hunter 2>/dev/null || true")
+            os._exit(0)
+
+        elif cmd in ["/help", "help", "/menu", "menu"]:
+            msg = (
+                "🤖 <b>Menu Perintah Oracle Hunter:</b>\n\n"
+                "📊 /status - Cek status pencarian saat ini\n"
+                "⏸️ /stop - Jeda pemburuan sementara\n"
+                "▶️ /start - Lanjutkan pemburuan\n"
+                "🛑 /exit - Hentikan bot secara permanen di PM2"
+            )
+            send_telegram_message(self.bot_token, self.authorized_chat_id, msg)
+

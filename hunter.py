@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import oci
 from telegram_notify import (
+    TelegramBotListener,
     notify_abort,
     notify_heartbeat,
     notify_startup,
@@ -411,9 +412,27 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
     start_time = datetime.datetime.utcnow()
     heartbeat_interval = int(cfg.get("heartbeat_attempts", 300))
 
+    hunter_state = {
+        "paused": False,
+        "attempts": 0,
+        "capacity_hits": 0,
+        "current_ad": ads[0] if ads else "",
+        "start_time": start_time,
+    }
+
+    # Start Telegram interactive command listener (allows /status, /stop, /start, /exit)
+    listener = TelegramBotListener(tg_token, tg_chat_id, hunter_state, cfg)
+    listener.start()
+
     while True:
+        if hunter_state.get("paused"):
+            time.sleep(1)
+            continue
+
         attempts += 1
+        hunter_state["attempts"] = attempts
         ad = ads[(attempts - 1) % len(ads)]
+        hunter_state["current_ad"] = ad
         logger.info(f"[Attempt #{attempts}] Requesting instance in {ad}...")
 
         launch_details = oci.core.models.LaunchInstanceDetails(
@@ -480,6 +499,7 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
 
             # Capacity / Transient error (Safe to retry)
             capacity_hits += 1
+            hunter_state["capacity_hits"] = capacity_hits
             logger.warning(f"Capacity unavailable or transient error ({code} / {status}): {message}")
 
         except Exception as e:
@@ -495,10 +515,13 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
             elapsed_str = str(datetime.timedelta(seconds=int(elapsed.total_seconds())))
             notify_heartbeat(tg_token, tg_chat_id, attempts, capacity_hits, ad, elapsed_str)
 
-        # Sleep before next retry
+        # Sleep before next retry in 1s slices to respond immediately if /stop is sent
         delay = random.randint(min_interval, max_interval)
         logger.info(f"Retrying in {delay}s...")
-        time.sleep(delay)
+        for _ in range(delay):
+            if hunter_state.get("paused"):
+                break
+            time.sleep(1)
 
 
 def main():
