@@ -462,7 +462,9 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
                 ssh_key_path,
                 cfg.get("local_pc_key_name", "oraclehost_id_rsa"),
             )
-            return
+            logger.info("Instance created successfully! Stopping daemon in PM2...")
+            os.system("pm2 stop oracle-hunter 2>/dev/null || true")
+            sys.exit(0)
 
         except oci.exceptions.ServiceError as e:
             code = e.code or ""
@@ -473,6 +475,7 @@ def hunt(cfg: Dict[str, Any], dry_run: bool = False, once: bool = False) -> None
             if code in ["LimitExceeded", "NotAuthorizedOrNotFound", "AuthFailure", "InvalidParameter"]:
                 logger.error(f"Fatal error ({code}): {message}")
                 notify_abort(tg_token, tg_chat_id, f"Fatal error ({code}): {message}")
+                os.system("pm2 stop oracle-hunter 2>/dev/null || true")
                 sys.exit(1)
 
             # Capacity / Transient error (Safe to retry)
